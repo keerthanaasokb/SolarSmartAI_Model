@@ -1,0 +1,106 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>SolarSmart AI</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f7f9;--c:#fff;--t:#1d2430;--m:#667085;--b:#dfe3ea;--a:#e8830c;--ok:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#12161c;--c:#1b212b;--t:#e7eaf0;--m:#9aa4b5;--b:#2b3340;--a:#f5a03a;--ok:#4ade80;--bad:#f87171}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--t);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:16px 20px 4px}h1{margin:0;font-size:22px}h1 span{color:var(--a)}h2{font-size:15px;margin:0 0 8px}
+.sub{color:var(--m);margin:2px 0}.warn{margin:8px 20px;padding:8px 12px;border:1px solid var(--a);border-radius:8px;font-size:12.5px}
+main{display:grid;grid-template-columns:290px 1fr;gap:14px;padding:10px 20px 30px;max-width:1400px;margin:auto}
+@media(max-width:850px){main{grid-template-columns:1fr}}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;min-width:0}
+#ctl label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0;font-size:12.5px}
+#ctl input,#ctl select{width:110px;background:var(--bg);color:var(--t);border:1px solid var(--b);border-radius:6px;padding:3px 6px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:1000px){.g2{grid-template-columns:1fr}}
+.stack{display:flex;flex-direction:column;gap:14px;min-width:0}
+.kpis{display:flex;gap:10px;flex-wrap:wrap}.kpi{flex:1;min-width:120px}.kpi b{display:block;font-size:20px;color:var(--a)}.kpi small{color:var(--m)}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:5px 8px;border-bottom:1px solid var(--b);text-align:left;white-space:nowrap}
+.pass{color:var(--ok)}.fail{color:var(--bad)}.plot{width:100%;height:300px}input[type=range]{width:100%}
+details{margin-top:6px}summary{cursor:pointer;font-weight:600}ul{margin:4px 0;padding-left:18px}
+</style></head><body>
+<header><h1>SolarSmart <span>AI</span> — Intelligent Solar Panel Orientation Optimizer</h1><p class="sub">Sun-position maths + exact dynamic-programming scheduler + in-browser Random Forest surrogate</p></header>
+<div class="warn"><b>Simulation only.</b> Irradiance is a synthetic clear-sky model (Meinel) scaled by a clearness factor, not measured weather data. Every energy value is a model estimate, not a real-world measurement or a promise of savings.</div>
+<main><div class="card" id="ctl"><h2>Inputs</h2><div id="ins"></div></div>
+<div class="stack">
+<div class="card"><div class="kpis" id="kpi"></div></div>
+<div class="card sc"><h2>Strategy comparison</h2><div id="tbl"></div></div>
+<div class="g2"><div class="card"><h2>Sun position &amp; panel compass</h2><div id="sky" class="plot"></div><input type="range" id="sl"><div id="rd" class="sub"></div></div>
+<div class="card"><h2>Estimated energy (kWh) vs tilt &amp; azimuth — whole period</h2><div id="hm" class="plot"></div></div></div>
+<div class="g2"><div class="card"><h2>Power vs time</h2><div id="pp" class="plot"></div></div><div class="card"><h2>Cumulative energy</h2><div id="ce" class="plot"></div></div></div>
+<div class="card"><h2>Why this orientation?</h2><div id="why"></div></div>
+<div class="g2"><div class="card"><h2>Validation &amp; ML check</h2><div id="val"></div></div>
+<div class="card"><h2>Model, assumptions &amp; limits</h2><div id="notes" style="font-size:13px">
+<details open><summary>Equations</summary><ul><li>Sun: declination δ=23.45°·sin(360/365·(284+n)); solar time = clock + (4·(lon−15·tz)+EoT)/60; sun vector (E,N,Up) from latitude, δ, hour angle ω.</li><li>Panel normal n=(sinβ sinγ, sinβ cosγ, cosβ); tilt β, azimuth γ (0°=N, 90°=E, 180°=S, 270°=W). cosθ = sun·n.</li><li>G<sub>poa</sub> = DNI·max(0,cosθ) + DHI·(1+cosβ)/2 + ρ·GHI·(1−cosβ)/2, ρ=0.2 (isotropic sky model).</li><li>P = min(P<sub>rated</sub>, P<sub>rated</sub>·G<sub>poa</sub>/1000·(1−shade)·(1−0.004·(T<sub>cell</sub>−25))), T<sub>cell</sub>=T<sub>amb</sub>+0.03125·G (NOCT 45 °C). Area = P<sub>rated</sub>/(1000·η).</li><li>Energy = Σ P·Δt (5-min steps). Improvement % = 100·(E<sub>opt</sub>−E<sub>fixed</sub>)/E<sub>fixed</sub>.</li></ul></details>
+<details><summary>Optimizer &amp; ML</summary><ul><li>Scheduled: tilt/azimuth candidates (10° / 15° grid within your limits) are scored per interval, then a dynamic program picks the sequence maximizing total energy minus movement cost. The cos θ objective is non-convex, so a grid search is safer than gradient methods, and the DP is exact for the discretized problem. If moves exceed your daily limit, the movement penalty is raised until it complies.</li><li>ML: 20-tree Random Forest regressor trained on synthetic labels from the physical model (random days, times, orientations); features: sun elevation, azimuth, tilt, panel azimuth, DNI, DHI. It only approximates the physics. Select “ML surrogate” to let the optimizer use it; all reported energies are still evaluated with the physical model.</li></ul></details>
+<details><summary>Limitations &amp; research ideas</summary><ul><li>Clear-sky model, no cloud dynamics, horizon shading, soiling, or inverter losses; no real data.</li><li>Tracking is an upper bound; small installations rarely justify motors and maintenance.</li><li>Hypotheses to test (not established inventions): move only if expected gain &gt; actuator cost; forecast uncertainty; online learning from measured output. No patentability is claimed without a prior-art search.</li></ul></details>
+<details><summary>Low-cost prototype idea</summary><ul><li>5–10 W panel, two hobby servos (tilt + azimuth), ESP32, INA219 current sensor, small reference cell or LDR; log measured power per orientation and compare with this model.</li></ul></details></div></div></div></div></main>
+<script>
+const R=Math.PI/180,DT=5/60,$=id=>document.getElementById(id),V=id=>+$(id).value;
+const defs=[["lat","Latitude °",13.08,-90,90,.01],["lon","Longitude °",80.27,-180,180,.01],["tz","UTC offset h",5.5,-12,14,.5],["date","Date","2026-10-22"],["rated","Rated power W",400,10,2000,10],["eff","Efficiency %",20,5,30,.5],["shade","Shading %",0,0,90,1],["ta","Ambient °C",32,-10,50,1],["cl","Clearness % (synthetic)",85,20,100,5],["tilt","Fixed tilt °",13,0,90,1],["paz","Fixed azimuth °",180,0,360,5],["t0","Start hour",6,0,23,.5],["t1","End hour",18,1,24,.5],["step","Adjust every min",60,"s",[15,30,60,120]],["tiltMax","Max tilt °",90,0,90,5],["azMin","Min azimuth °",0,0,360,15],["azMax","Max azimuth °",345,0,360,15],["maxAdj","Max adjustments",6,0,48,1],["mc","Move energy Wh",1,0,50,.5],["pen","Move penalty Wh",0,0,50,.5],["mode","Show strategy","scheduled","s",["fixed","scheduled","tracking"]],["eng","Optimizer uses","physics","s",["physics","ml"]]];
+$("ins").innerHTML=defs.map(d=>d[3]==="s"?`<label>${d[1]}<select id="${d[0]}">${d[4].map(o=>`<option${o==d[2]?" selected":""}>${o}</option>`).join("")}</select></label>`:d[0]==="date"?`<label>${d[1]}<input id="date" type="date" value="${d[2]}"></label>`:`<label>${d[1]}<input id="${d[0]}" type="number" value="${d[2]}" min="${d[3]}" max="${d[4]}" step="${d[5]}"></label>`).join("");
+function sun(lat,lon,tz,n,h){const B=360/365*(n-81)*R,eot=9.87*Math.sin(2*B)-7.53*Math.cos(B)-1.5*Math.sin(B),dec=23.45*R*Math.sin(360/365*(284+n)*R),w=15*(h+(4*(lon-15*tz)+eot)/60-12)*R,p=lat*R;
+const E=-Math.cos(dec)*Math.sin(w),N=Math.cos(p)*Math.sin(dec)-Math.sin(p)*Math.cos(dec)*Math.cos(w),U=Math.sin(p)*Math.sin(dec)+Math.cos(p)*Math.cos(dec)*Math.cos(w);
+return{E,N,U,el:Math.asin(Math.max(-1,Math.min(1,U)))/R,az:(Math.atan2(E,N)/R+360)%360,dec:dec/R}}
+function irr(s,cl){if(s.U<=0)return{dni:0,dhi:0};const am=1/(s.U+.50572*Math.pow(6.07995+s.el,-1.6364)),dc=1353*Math.pow(.7,Math.pow(am,.678));return{dni:dc*cl,dhi:dc*(.1+.2*(1-cl))}}
+function poa(s,i,tl,az){const b=tl*R,g=az*R,sb=Math.sin(b),c=s.E*sb*Math.sin(g)+s.N*sb*Math.cos(g)+s.U*Math.cos(b),beam=i.dni*Math.max(0,c);return{c,beam,g:beam+i.dhi*(1+Math.cos(b))/2+.2*(i.dni*Math.max(s.U,0)+i.dhi)*(1-Math.cos(b))/2}}
+const pw=(g,P)=>Math.min(P.rated,P.rated*g/1000*(1-P.shade)*Math.max(0,1-.004*(P.ta+.03125*g-25)));
+function mul(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function tree(X,y,idx,d,rnd){const n=idx.length;let sum=0;for(const k of idx)sum+=y[k];const m=sum/n;if(d==0||n<10)return{v:m};let bf=-1,bt=0,bs=-1;
+for(let a=0;a<3;a++){const f=Math.floor(rnd()*6);for(let q=0;q<6;q++){const t=X[idx[Math.floor(rnd()*n)]][f];let sl=0,nl=0;for(const k of idx)if(X[k][f]<=t){sl+=y[k];nl++}const nr=n-nl;if(nl<3||nr<3)continue;const sc=sl*sl/nl+(sum-sl)**2/nr;if(sc>bs){bs=sc;bf=f;bt=t}}}
+if(bf<0)return{v:m};const L=[],Rr=[];for(const k of idx)(X[k][bf]<=bt?L:Rr).push(k);return{f:bf,t:bt,l:tree(X,y,L,d-1,rnd),r:tree(X,y,Rr,d-1,rnd)}}
+const tp=(t,x)=>{while(t.f!==undefined)t=x[t.f]<=t.t?t.l:t.r;return t.v};
+function train(P){const rnd=mul(42),gen=n=>{const X=[],y=[];while(X.length<n){const d=1+Math.floor(rnd()*365),h=5+rnd()*14,s=sun(P.lat,P.lon,P.tz,d,h);if(s.U<=.02)continue;const i=irr(s,P.cl),tl=rnd()*90,az=rnd()*360;X.push([s.el,s.az,tl,az,i.dni,i.dhi]);y.push(pw(poa(s,i,tl,az).g,P))}return[X,y]};
+const[X,y]=gen(3500),[Xt,yt]=gen(800),T=[];for(let k=0;k<20;k++){const idx=[];for(let j=0;j<X.length;j++)idx.push(Math.floor(rnd()*X.length));T.push(tree(X,y,idx,11,rnd))}
+const pr=x=>T.reduce((a,t)=>a+tp(t,x),0)/T.length;let ae=0,se=0;Xt.forEach((x,k)=>{const e=pr(x)-yt[k];ae+=Math.abs(e);se+=e*e});return{pr,mae:ae/yt.length,rmse:Math.sqrt(se/yt.length),n:X.length,nt:Xt.length}}
+function dp(E,C,lam){const n=E.length,B=[Float64Array.from(E[0])],pv=[];for(let s=1;s<n;s++){const p=B[s-1];let mi=0;for(let j=1;j<C;j++)if(p[j]>p[mi])mi=j;const b=new Float64Array(C),q=new Int32Array(C);
+for(let j=0;j<C;j++){if(p[j]>=p[mi]-lam){b[j]=p[j]+E[s][j];q[j]=j}else{b[j]=p[mi]-lam+E[s][j];q[j]=mi}}B.push(b);pv.push(q)}
+let j=0;const l=B[n-1];for(let k=1;k<C;k++)if(l[k]>l[j])j=k;const ch=new Array(n);for(let s=n-1;s>=0;s--){ch[s]=j;if(s>0)j=pv[s-1][j]}let mv=0;for(let s=1;s<n;s++)if(ch[s]!=ch[s-1])mv++;return{ch,mv}}
+function schedule(P,S,f){const ns=Math.max(1,Math.ceil((P.t1-P.t0)/P.step-1e-9)),C=[];for(let t=0;t<=P.tiltMax;t+=10)for(let a=P.azMin;a<=P.azMax;a+=15)C.push([t,a]);C.push([P.tilt,P.paz]);
+const seg=S.map(x=>Math.min(ns-1,Math.floor((x.h-P.t0)/P.step+1e-9))),E=Array.from({length:ns},()=>new Float64Array(C.length));
+S.forEach((x,k)=>{if(x.s.U>0)C.forEach((c,j)=>E[seg[k]][j]+=f(x,c[0],c[1])*DT)});let lam=P.mc+P.pen,r;for(let it=0;it<45;it++){r=dp(E,C.length,lam);if(r.mv<=P.maxAdj)break;lam=lam*1.5+1}
+return{C,seg,ch:r.ch,mv:r.mv,ns}}
+let ck="",ml,S,RS,P0;const fh=h=>{const m=Math.round(h*60);return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0")};
+function read(){const d=new Date($("date").value+"T00:00:00Z"),y=d.getUTCFullYear();return{lat:V("lat"),lon:V("lon"),tz:V("tz"),doy:Math.round((d-Date.UTC(y,0,0))/864e5),rated:V("rated"),eff:V("eff")/100,shade:V("shade")/100,ta:V("ta"),cl:V("cl")/100,tilt:V("tilt"),paz:V("paz"),t0:V("t0"),t1:V("t1"),step:V("step")/60,tiltMax:V("tiltMax"),azMin:V("azMin"),azMax:V("azMax"),maxAdj:V("maxAdj"),mc:V("mc"),pen:V("pen"),mode:$("mode").value,eng:$("eng").value}}
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function lay(x,y){return{margin:{l:48,r:10,t:10,b:40},paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",font:{color:css("--t"),size:11},xaxis:{title:x,gridcolor:css("--b")},yaxis:{title:y,gridcolor:css("--b")},legend:{orientation:"h",y:-.25}}}
+function run(){const P=read();P0=P;if(!(P.t1>P.t0))return;const key=[P.lat,P.lon,P.rated,P.eff,P.shade,P.ta,P.cl,P.tz].join();if(key!==ck){ml=train(P);ck=key}
+S=[];for(let h=P.t0;h<=P.t1+1e-9;h+=DT){const s=sun(P.lat,P.lon,P.tz,P.doy,h);S.push({h,s,i:irr(s,P.cl)})}
+const fp=(x,t,a)=>pw(poa(x.s,x.i,t,a).g,P),fm=(x,t,a)=>Math.max(0,Math.min(P.rated,ml.pr([x.s.el,x.s.az,t,a,x.i.dni,x.i.dhi]))),f=P.eng=="ml"?fm:fp;
+const sc=schedule(P,S,f),oF=S.map(()=>[P.tilt,P.paz]),oS=S.map((_,k)=>sc.C[sc.ch[sc.seg[k]]]),oT=S.map(x=>x.s.U>0?[90-x.s.el,x.s.az]:[0,0]);
+const pw3=o=>S.map((x,k)=>x.s.U>0?fp(x,o[k][0],o[k][1]):0),pF=pw3(oF),pS=pw3(oS),pT=pw3(oT),pM=S.map((x,k)=>x.s.U>0?fm(x,oS[k][0],oS[k][1]):0);
+const en=p=>p.reduce((a,b)=>a+b,0)*DT/1000,cum=p=>{let a=0;return p.map(v=>a+=v*DT/1000)};
+const eF=en(pF),eSg=en(pS),cost=sc.mv*P.mc/1000,eS=eSg-cost,eT=en(pT),tm=S.map(x=>x.h);
+const tl=[],az=[];for(let t=0;t<=90;t+=5)tl.push(t);for(let a=0;a<360;a+=10)az.push(a);let bt=0,ba=0,be=-1;
+const Z=tl.map(t=>az.map(a=>{let s=0;for(const x of S)if(x.s.U>0)s+=fp(x,t,a);s=s*DT/1000;if(s>be){be=s;bt=t;ba=a}return s}));
+RS={P,oF,oS,oT,pF,pS,pT,eF,eS,eT,sc,bt,ba,be,cost};
+const gain=e=>(100*(e-eF)/eF).toFixed(1)+" %",rg=(o,i)=>{const v=o.map(z=>z[i]);return Math.round(Math.min(...v))+"–"+Math.round(Math.max(...v))+"°"},act=S.map((x,k)=>x.s.U>0?k:-1).filter(k=>k>=0).map(k=>k),rgA=o=>{const q=act.map(k=>o[k]);return q.length?rg(q,0)+" / "+rg(q,1):"—"};
+$("kpi").innerHTML=[["Best fixed tilt / az",bt+"° / "+ba+"°"],["Best fixed energy",be.toFixed(2)+" kWh"],["Scheduled net",eS.toFixed(2)+" kWh"],["Tracking (ideal)",eT.toFixed(2)+" kWh"],["Panel area",(P.rated/(1000*P.eff)).toFixed(2)+" m²"]].map(a=>`<div class="kpi"><small>${a[0]}</small><b>${a[1]}</b></div>`).join("");
+const hl=m=>P.mode==m?' style="background:rgba(232,131,12,.12)"':"";
+$("tbl").innerHTML=`<table><tr><th>Metric</th><th>Fixed panel</th><th>Scheduled optimization</th><th>Ideal tracking</th></tr>
+<tr${hl("fixed")}><td>Tilt / azimuth (range)</td><td>${P.tilt}° / ${P.paz}°</td><td>${rgA(oS)}</td><td>${rgA(oT)}</td></tr>
+<tr><td>Estimated daily energy</td><td>${eF.toFixed(3)} kWh</td><td>${eS.toFixed(3)} kWh</td><td>${eT.toFixed(3)} kWh</td></tr>
+<tr><td>Gain vs fixed</td><td>baseline</td><td>${gain(eS)}</td><td>${gain(eT)}</td></tr>
+<tr><td>Adjustments</td><td>0</td><td>${sc.mv}</td><td>continuous (theoretical)</td></tr>
+<tr><td>Adjustment energy cost</td><td>0</td><td>${(cost*1000).toFixed(1)} Wh</td><td>not modelled</td></tr></table><p class="sub">Highlighted row follows the “Show strategy” control. Energies use the physical model; scheduled is net of movement energy. Tracking is an idealized upper bound.</p>`;
+const L=lay("Local time (h)","Power (W)");Plotly.react("pp",[{x:tm,y:pF,name:"Fixed"},{x:tm,y:pS,name:"Scheduled"},{x:tm,y:pT,name:"Ideal tracking"},{x:tm,y:pM,name:"ML on scheduled",line:{dash:"dot"}}],L,{displayModeBar:false,responsive:true});
+Plotly.react("ce",[{x:tm,y:cum(pF),name:"Fixed"},{x:tm,y:cum(pS),name:"Scheduled (gross)"},{x:tm,y:cum(pT),name:"Ideal tracking"}],lay("Local time (h)","kWh"),{displayModeBar:false,responsive:true});
+const LH=lay("Panel azimuth ° (0=N,180=S)","Tilt °");Plotly.react("hm",[{z:Z,x:az,y:tl,type:"heatmap",colorscale:"YlOrRd",colorbar:{title:"kWh"}},{x:[ba],y:[bt],mode:"markers",marker:{symbol:"star",size:12,color:"#2563eb"},name:"optimum"}],LH,{displayModeBar:false,responsive:true});
+let g=[],st=0;for(let s=1;s<=sc.ns;s++){if(s==sc.ns||sc.ch[s]!=sc.ch[st]){const c=sc.C[sc.ch[st]];g.push(`${fh(P.t0+st*P.step)}–${fh(Math.min(P.t1,P.t0+s*P.step))}: tilt ${c[0]}°, az ${c[1]}°`);st=s}}
+const bs=Math.round(Math.abs(P.lat));$("why").innerHTML=`<p>For the selected period the whole-period best <b>fixed</b> orientation is tilt <b>${bt}°</b>, azimuth <b>${ba}°</b> (${be.toFixed(2)} kWh); the latitude is ${P.lat}°, and the best tilt shifts with the season and the declination (${S[0].s.dec.toFixed(1)}° today). The scheduler maximizes energy over the <i>entire</i> period (not noon alone): it faces the sun’s changing direction while paying ${P.mc+P.pen} Wh per move, limited to ${P.maxAdj} adjustments. It used ${sc.mv}.</p><ul>${g.map(x=>`<li>${x}</li>`).join("")}</ul><p>Result: scheduled net ${gain(eS)} vs your fixed setting; ideal tracking ${gain(eT)}. These are model values; for a small panel, check whether the gain justifies motors, wiring and maintenance.</p>`;
+const sl=$("sl");sl.min=P.t0;sl.max=P.t1;sl.step=DT;if(+sl.value<P.t0||+sl.value>P.t1||!sl.dataset.i){sl.value=Math.min(P.t1,Math.max(P.t0,12));sl.dataset.i=1}
+validate(P,fp,eF,eS,eT,sc,ml);sky()}
+function sky(){if(!RS)return;const{P,oF,oS,oT,pF,pS,pT}=RS,h=+$("sl").value,k=Math.max(0,Math.min(S.length-1,Math.round((h-P.t0)/DT))),x=S[k],o={fixed:oF,scheduled:oS,tracking:oT}[P.mode][k],pp={fixed:pF,scheduled:pS,tracking:pT}[P.mode][k];
+const up=S.filter(q=>q.s.U>0),inc=x.s.U>0?Math.acos(Math.min(1,Math.max(-1,poa(x.s,x.i,o[0],o[1]).c)))/R:null;
+Plotly.react("sky",[{type:"scatterpolar",theta:up.map(q=>q.s.az),r:up.map(q=>90-q.s.el),mode:"lines",name:"Sun path",line:{color:css("--a")}},{type:"scatterpolar",theta:x.s.U>0?[x.s.az]:[],r:x.s.U>0?[90-x.s.el]:[],mode:"markers",name:"Sun",marker:{size:14,color:"#f59e0b",symbol:"circle"}},{type:"scatterpolar",theta:[o[1]],r:[o[0]],mode:"markers",name:"Panel normal",marker:{size:12,color:"#2563eb",symbol:"diamond"}}],{margin:{l:30,r:30,t:10,b:30},paper_bgcolor:"rgba(0,0,0,0)",font:{color:css("--t"),size:11},legend:{orientation:"h",y:-.1},polar:{bgcolor:"rgba(0,0,0,0)",radialaxis:{range:[0,90],tickvals:[0,30,60,90],ticktext:["zenith","60°","30°","horizon"],gridcolor:css("--b")},angularaxis:{rotation:90,direction:"clockwise",tickvals:[0,90,180,270],ticktext:["N","E","S","W"],gridcolor:css("--b")}}},{displayModeBar:false,responsive:true});
+$("rd").innerHTML=`${fh(x.h)} · sun elevation ${x.s.el.toFixed(1)}°, azimuth ${x.s.az.toFixed(0)}° · panel tilt ${o[0].toFixed(0)}°, az ${o[1].toFixed(0)}° · incidence ${inc===null?"sun below horizon":inc.toFixed(1)+"°"} · ${pp.toFixed(0)} W (${P.mode})`}
+function validate(P,fp,eF,eS,eT,sc,ml){const ch=[];const night=S.filter(x=>x.s.U<=0);ch.push(["Power is zero whenever the sun is below the horizon ("+night.length+" samples)",night.every(x=>fp(x,P.tilt,P.paz)==0&&fp(x,45,180)==0)]);
+const up=S.filter(x=>x.s.U>0);ch.push(["Direct beam = 0 when the sun is behind the panel (vertical panel facing away, "+up.length+" samples)",up.every(x=>{const a=(x.s.az+180)%360;return poa(x.s,x.i,90,a).beam==0})]);
+ch.push(["Tracking incidence angle ≈ 0° whenever the sun is up",up.every(x=>Math.acos(Math.min(1,poa(x.s,x.i,90-x.s.el,x.s.az).c))/R<.05)]);
+let mx=-9,ex=0;for(let h=0;h<24;h+=.05){const s=sun(P.lat,P.lon,P.tz,P.doy,h);if(s.el>mx){mx=s.el;ex=90-Math.abs(P.lat-s.dec)}}ch.push([`Max sun elevation ${mx.toFixed(1)}° vs analytic 90−|φ−δ| = ${ex.toFixed(1)}°`,Math.abs(mx-ex)<1.5]);
+ch.push([`Scheduled net (${eS.toFixed(3)}) ≥ fixed (${eF.toFixed(3)}) kWh`,eS>=eF-1e-9]);ch.push([`Ideal tracking (${eT.toFixed(3)}) ≥ fixed kWh`,eT>=eF-1e-9]);ch.push([`Adjustments ${sc.mv} ≤ limit ${P.maxAdj}`,sc.mv<=P.maxAdj]);
+ch.push([`ML RMSE ${ml.rmse.toFixed(1)} W is under 5 % of rated power`,ml.rmse<.05*P.rated]);
+$("val").innerHTML=`<table>${ch.map(c=>`<tr><td>${c[0]}</td><td class="${c[1]?"pass":"fail"}">${c[1]?"PASS":"FAIL"}</td></tr>`).join("")}</table><p><b>ML surrogate (Random Forest, 20 trees)</b>: trained on ${ml.n} synthetic samples from the physical model, tested on ${ml.nt} unseen synthetic samples: MAE <b>${ml.mae.toFixed(1)} W</b>, RMSE <b>${ml.rmse.toFixed(1)} W</b>. It approximates the physics and does not outperform it. Real output also depends on weather, shading, temperature and panel specifics.</p>`}
+let tm;document.querySelectorAll("#ins input,#ins select").forEach(e=>e.addEventListener("input",()=>{clearTimeout(tm);tm=setTimeout(run,250)}));$("sl").addEventListener("input",sky);
+window.addEventListener("load",()=>{if(typeof Plotly==="undefined"){$("why").innerHTML="<b class='fail'>The Plotly charting library could not be loaded (network or content-policy block), so charts cannot be drawn.</b>"}try{run()}catch(e){$("why").innerHTML+="<p class='fail'>Error: "+e.message+"</p>"}});
+</script></body></html>
